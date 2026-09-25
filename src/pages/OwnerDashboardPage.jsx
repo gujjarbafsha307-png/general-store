@@ -1,0 +1,31 @@
+import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { supabase } from '../services/supabase'
+import { useStore } from '../context/useStore'
+
+const categories = ['Biscuits', 'Cakes', 'Toffees', 'Beverages', 'Other Store Items']
+
+export default function OwnerDashboardPage() {
+  const { products, deals, orders, addProduct, deleteProduct, updateOrder, ownerSettings, logout } = useStore()
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ name: '', description: '', price: '', wholesalePrice: '', category: 'Cakes', stock: '10', image: '' })
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef(null)
+  const totals = useMemo(() => ({ revenue: orders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0), customers: new Set(orders.map(order => order.user_id || order.customer_phone)).size }), [orders])
+  const setField = event => setForm({ ...form, [event.target.name]: event.target.value })
+  const uploadImage = async event => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    if (supabase) {
+      const path = `products/${Date.now()}-${file.name.replace(/[^a-z0-9.-]/gi, '-')}`
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: false, contentType: file.type })
+      if (!error) { const { data } = supabase.storage.from('product-images').getPublicUrl(path); setForm(current => ({ ...current, image: data.publicUrl })) }
+    } else setForm(current => ({ ...current, image: URL.createObjectURL(file) }))
+    setUploading(false)
+  }
+  const save = event => { event.preventDefault(); addProduct({ ...form, price: Number(form.price), wholesalePrice: Number(form.wholesalePrice) || null, stock: Number(form.stock), image: form.image || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=900&q=80' }); setForm({ name: '', description: '', price: '', wholesalePrice: '', category: 'Cakes', stock: '10', image: '' }); setShowForm(false) }
+  return <div className="dashboard"><aside className="dashboard-nav"><Link className="brand" to="/"><span className="brand-mark">IS</span><span><strong>Owner studio</strong><small>{ownerSettings.location}</small></span></Link><p className="dash-label">MANAGE STORE</p><Link className="dash-active" to="/owner">Overview</Link><a>Products <b>{products.length}</b></a><a>Deals <b>{deals.length}</b></a><Link to="/owner/orders">Orders <b>{orders.filter(order => (order.status || order.order_status) === 'pending').length}</b></Link><a>Customers <b>{totals.customers}</b></a><button className="dash-logout" onClick={logout}>Sign out</button></aside><main className="dashboard-main"><div className="dashboard-top"><div><p className="eyebrow">STORE OVERVIEW</p><h1>Good morning.</h1></div><button className="button button-gold" onClick={() => setShowForm(!showForm)}>{showForm ? 'Close form' : '+ Add product'}</button></div><div className="stats-grid stats-grid-four"><div><span>Total products</span><strong>{products.length}</strong><small>In your catalogue</small></div><div><span>Total orders</span><strong>{orders.length}</strong><small>All order records</small></div><div><span>Total customers</span><strong>{totals.customers}</strong><small>Unique buyers</small></div><div><span>Revenue</span><strong>Rs. {totals.revenue.toLocaleString()}</strong><small>From recorded orders</small></div></div><div className="dashboard-content"><section className="dash-section"><div className="dash-section-head"><div><p className="eyebrow">CATALOGUE</p><h2>Products</h2></div></div>{showForm && <form className="product-form" onSubmit={save}><div className="form-two"><label>Product name<input required name="name" value={form.name} onChange={setField} /></label><label>Category<select name="category" value={form.category} onChange={setField}>{categories.map(item => <option key={item}>{item}</option>)}</select></label></div><div className="form-two"><label>Retail price<input required min="0" type="number" name="price" value={form.price} onChange={setField} /></label><label>Stock<input required min="0" type="number" name="stock" value={form.stock} onChange={setField} /></label></div><label>Description<textarea required name="description" value={form.description} onChange={setField} /></label><div className="upload-actions"><button type="button" className="button button-outline" onClick={() => fileRef.current?.click()}>{uploading ? 'Uploading...' : 'Upload from gallery'}</button><input ref={fileRef} hidden type="file" accept="image/*" capture="environment" onChange={uploadImage} /><span className="muted">Gallery and camera capture are supported on mobile.</span></div>{form.image && <img className="upload-preview" src={form.image} alt="Product preview" />}<button className="button button-gold" disabled={uploading}>Save product</button></form>}{products.map(product => <div className="admin-row" key={product.id}><img src={product.image} alt="" loading="lazy" /><div><strong>{product.name}</strong><small>{product.category} · {product.stock} in stock</small></div><strong>Rs. {Number(product.price).toLocaleString()}</strong><button className="icon-button" onClick={() => deleteProduct(product.id)} aria-label={`Delete ${product.name}`}>×</button></div>)}</section><section className="dash-section"><div className="dash-section-head"><div><p className="eyebrow">RECENT ACTIVITY</p><h2>Orders</h2></div><Link className="text-link" to="/owner/orders">View all →</Link></div><OwnerOrderList orders={orders.slice(0, 5)} updateOrder={updateOrder} /></section></div></main></div>
+}
+
+function OwnerOrderList({ orders, updateOrder }) { return orders.length ? <div className="owner-order-list">{orders.map(order => <div className="owner-order-item" key={order.id || order.order_group_id}><div><strong>#{order.id || order.order_group_id}</strong><small>{order.customer_name} · Rs. {Number(order.total_amount || 0).toLocaleString()}</small></div><select value={order.status || order.order_status || 'pending'} onChange={event => updateOrder(order.id || order.order_group_id, event.target.value)}><option>pending</option><option>completed</option><option>cancelled</option></select></div>)}</div> : <p className="muted">No orders yet.</p> }
